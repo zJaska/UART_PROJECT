@@ -1,0 +1,279 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+
+entity Transmitter is
+	port(
+	
+	--DEBUG
+	LATCH_START: out std_logic;
+	OUT_MNG:out std_logic;
+	OUT_JOHNSON:out std_logic;
+	
+	RESET_ALL:in std_logic;
+	CLK: in std_logic;
+	START: in std_logic;
+	CTS: in std_logic;
+	B_IN: in std_logic_vector(6 downto 0);
+	RX_OUT: out std_logic);
+end Transmitter;
+
+architecture rtl of Transmitter is
+
+	signal TICK : std_logic;
+	signal PRESET_JOHNSON_COUNTER: std_logic;
+	signal ENABLE_JOHNSON:std_logic;
+	signal MIDDLE_TICK:std_logic;
+	
+	signal RESET_COUNTER:std_logic;
+	signal ENABLE_COUNTER:std_logic;
+	signal T_BIT_COUNT:std_logic_vector(0 to 3);
+	
+	signal SELECT_MUX:std_logic;
+	signal ENTRY_A_MUX:std_logic;
+	signal ENTRY_B_MUX:std_logic;
+	
+	signal RST_START_MNG:std_logic;
+	signal CONTROL_LOAD_SHIFT:std_logic;
+	signal TEMP_LATCH_OUT_START:std_logic;
+	signal TEMP_NOT_LATCH_OUT_START:std_logic;
+	
+	signal FINISHED:std_logic; --Ho contato fino a 10
+	
+	signal ENABLE_RESETTER:std_logic;
+	signal RESETTER_MNG:std_logic;
+	
+	signal RESET_PISO:std_logic;
+	signal PRESET_PISO:std_logic;
+	signal ENABLE_PISO:std_logic;
+	
+	signal STOP_BIT:std_logic;
+	signal START_BIT:std_logic;
+	
+	signal ENABLE_PARITY_CALC:std_logic;
+	signal PRESET_PARITY_CALC:std_logic;
+	signal RST_PARITY_CALC:std_logic;
+	signal TMP_OUT_PARITY:std_logic;
+	
+	signal OUT_MUX:std_logic;
+	
+	constant thisN : integer := 9; 
+	
+	component Tick_Counter is
+	generic(
+		N : integer
+	);
+	port(
+		clock: 	in std_logic;
+		preset:	in std_logic;
+		enable:	in std_logic;
+		tick:		out std_logic;
+		m_tick:	out std_logic
+	);
+	end component;
+	
+	component Parity_Bit_Generator is
+	port(
+		d_in: 				in std_logic;
+		tick:					in std_logic;
+		reset:				in std_logic;
+		preset:				in std_logic;
+		enable:				in std_logic;
+		even_p: 				out std_logic
+	);
+	end component;
+	
+	
+	component Bit_Counter is
+	generic( 
+		N: integer 
+	); 
+	port( 
+		tick: 	in std_logic; 
+		reset: 	in std_logic; 
+		enable: 	in std_logic;
+		count: 	out std_logic_vector(0 to N-1) 
+	);
+	end component;
+	
+	component MUX_2_1_Nbit is
+		port( SEL: in std_logic;
+		A, B: in std_logic;
+		Y: out std_logic 
+		);
+	end component;
+	
+
+	component PISO is
+
+    generic(
+
+            N: integer 
+
+    );
+
+    port(
+
+    CLK: in std_logic;
+
+    RESET: in std_logic;
+
+    LOAD: in std_logic;
+
+    PRESET: in std_logic;
+
+    ENABLE: in std_logic;
+
+    XP: in std_logic_vector(0 to N-1);
+
+    Y: out std_logic);
+
+    end component;
+	
+	component START_MANAGEMENT is
+	port(
+		CLOCK_MNG: in std_logic;
+		CTS_MNG: in std_logic;
+		START_MNG: in std_logic;
+		RST_MNG: in std_logic;
+		LATCH_OUT_START: out std_logic;
+		NOT_LATCH_OUT_START: out std_logic;
+		LOAD_CONTROL: out std_logic
+	);
+	end component;
+	
+	component D_LATCH is
+	port 
+	(D: in std_logic;
+	 ENABLE: in std_logic;
+	 RESET: in std_logic;
+	 Q: out std_logic);
+	end component;
+	
+	
+begin
+	
+	U1: Tick_Counter
+		generic map(
+			N=>16
+		)
+		port map(
+			clock=> CLK,
+			tick=> TICK,
+			preset=> PRESET_JOHNSON_COUNTER,
+			enable=> ENABLE_JOHNSON,
+			m_tick=> MIDDLE_TICK
+		);
+	
+	U2: Bit_Counter
+		generic map(
+			N=>4
+		)
+		port map(
+		tick=> CLK,
+		reset => RESET_COUNTER,
+		enable=> ENABLE_COUNTER,
+		count=> T_BIT_COUNT
+		);
+		
+	 U3: MUX_2_1_Nbit
+		port map(
+			SEL=> SELECT_MUX,
+			A=> ENTRY_A_MUX,
+			B=> ENTRY_B_MUX,
+			Y=>OUT_MUX
+		);
+	
+    U4: START_MANAGEMENT
+		port map(
+		CLOCK_MNG=>CLK,
+		CTS_MNG => CTS,
+		START_MNG=> START,
+		RST_MNG=> RST_START_MNG,
+		LOAD_CONTROL=>CONTROL_LOAD_SHIFT,
+		LATCH_OUT_START=> TEMP_LATCH_OUT_START,
+		NOT_LATCH_OUT_START=>TEMP_NOT_LATCH_OUT_START
+		);
+		
+	U5: D_LATCH
+		port map(
+		D=>FINISHED,
+		ENABLE=>ENABLE_RESETTER,
+		RESET=>TEMP_NOT_LATCH_OUT_START,
+		Q=>RST_START_MNG
+		);
+	
+--	U6: PISO
+--    generic map(N=>11)
+--    port map (
+--      CLK=>TICK,
+--      LOAD=>CONTROL_LOAD_SHIFT,
+--      RESET=>RESET_PISO,
+--      PRESET=>PRESET_PISO,
+--      XP(1 to N-2)=>B_IN(6 downto 0),
+--      XP(0)=>STOP_BIT,
+ --     XP(N-1)=>START_BIT,
+  --    ENABLE=>ENABLE_PISO,
+   --   Y=>ENTRY_A_MUX
+    --);			
+			
+	   
+	U6: PISO
+    generic map(N=>thisN)
+    port map(
+      CLK => CLK,
+      LOAD => CONTROL_LOAD_SHIFT,
+      RESET => RESET_PISO,
+      PRESET => PRESET_PISO,
+      XP(1 to thisN-2) => B_IN(6 downto 0),
+      XP(0) => STOP_BIT,
+      XP(thisN-1) => START_BIT,
+      ENABLE => ENABLE_PISO,
+      Y => RX_OUT
+    );
+	 
+	U7: Parity_Bit_Generator
+		port map(
+		d_in=> ENTRY_A_MUX,
+		tick=>	TICK,
+		reset=>	RST_PARITY_CALC,
+		preset=>	PRESET_PARITY_CALC,
+		enable=> ENABLE_PARITY_CALC,
+		even_p=>TMP_OUT_PARITY 				
+		);
+		
+	 ENTRY_B_MUX<=TMP_OUT_PARITY;
+	 
+	 STOP_BIT<='1';
+	 START_BIT<='0';
+
+	 RESET_COUNTER<=NOT(CONTROL_LOAD_SHIFT);
+	 PRESET_JOHNSON_COUNTER<=NOT(CONTROL_LOAD_SHIFT);
+	 RST_PARITY_CALC<=NOT(CONTROL_LOAD_SHIFT);
+	 
+	 PRESET_PISO<=NOT(TEMP_LATCH_OUT_START);
+	 
+	 ENABLE_PISO<=TEMP_LATCH_OUT_START;
+	 
+	 ENABLE_JOHNSON<='1';
+	 ENABLE_COUNTER<='1';
+	 ENABLE_RESETTER<='1';
+	 
+	 ENABLE_PARITY_CALC<=TEMP_LATCH_OUT_START;
+	 
+	 SELECT_MUX<='0';
+ 
+	 FINISHED<=((T_BIT_COUNT(3))AND(NOT(T_BIT_COUNT(2))) AND (T_BIT_COUNT(1)) AND (NOT(T_BIT_COUNT(0)))); --Littlenedian o bigendian controllare!
+	 
+	 
+	 
+	LATCH_START<=TEMP_LATCH_OUT_START;
+	OUT_MNG<=CONTROL_LOAD_SHIFT;
+	OUT_JOHNSON<=TICK;
+	
+	RESET_COUNTER<=RESET_ALL;
+	RST_PARITY_CALC<=RESET_ALL;
+	RST_START_MNG<=RESET_ALL;
+	TEMP_NOT_LATCH_OUT_START<=RESET_ALL;
+			
+end rtl;
+
